@@ -1,0 +1,192 @@
+Rain world - Saving to the disk:
+
+MISPROG is put at the very beginning(Right after checksum) if it is not already.
+
+TempSheltersDiscovered is cleared
+proglines is split by progdivA
+Text is equal to an empty string
+for every string split by <progDivA>
+  array2 is an array of strings split by <progDivB>
+    IF MISCPROG is the first thing in progDivA(Array2) (The checksum is removed temporarily)
+      if (!saveMiscProg)
+        The other prog lines are just added to text.
+      else
+        the text is MISCPROG<progDivB> + miscProgressionData.ToString()
+            ((First saves shelterLists, then Saves LevelTokens, Then saves SandBoxTokens, Then Saves PlayedArenas, then Saves "INTEGERS", lastly saves redsFlower and menuRegion.))
+
+
+
+SaveDiscoveredShelter:
+Matches the first 2 letters of a region's name with the room's name to find the shelter's region
+Will simply not save the shelter if the region is not found.
+
+If discoveredShelters[region iteration] does not exist (because the region is new or did not previously exist) create a new list for the shelters in that region
+If discoveredShelters[region] list already has the current room, then it will not be saved
+Otherwise the room is added to the discoveredShelters list.
+
+GetProgLines()
+CHECKSUM is here!
+regex.split returns an array of strings split up by a delimiter
+If the file does not already exist than an empty array (No elements)
+
+---------------------------
+Still not sure what <progDivA> was actually dividing
+Kind of assumes that the file is already there...or at least that the file is not empty/invalid completely.
+
+MiscProgressionData::
+ currentlyselectedSlugcat - int[Index:0]
+ watchedSleepScreens - int[Index:1]
+ watchedDeathScreens - int[Index:2]
+ watchedDeathScreensWithflower - int[Index:3]
+ watchedMalnorishScreens - int[Index:4]
+ starvationTutorialCounter - int[Index:5]
+ warnedAboutKarmaLossOnExit - int[Index:6]
+ redHasVisitedPebbles - boolean[Index:7] (converted into boolean)
+ redUnlocked - boolean[Index:8] (converted into boolean)
+ lookedForOldVersionSaveFile - boolean[Index:9]
+ redMeatEatTutorial - int[Index:10]
+ FUNCTIONS:
+ IsThereAnyDiscoveredShetlers - Checks whenever discoveredShelters is empty or not.
+ 
+ ToString():
+   text is an empty string
+     for however long discoveredshelters is
+       Starts new section with SHELTERLIST<mpdB>_REGIONNAME_<mpdB> and ends with <mpdA>
+       Done for the shelters in every region
+       <mpdC> divedes the individual room names.
+ //<mpdA> divides every region
+ //<mpdB> divides out the region suffix (name)
+ //<mpdC> divides out the shelter room's name
+     text gets appended for every shelter in shelterList (discoveredShelters will also contain shelters previously read in the file)
+ 
+    LevelTokens is then saved
+    SandBoxTokens is then saved
+    PlayedArenas is then saved
+    Integers (Mentioned above) are then saved
+    If REDSFLOWER exists? then it will be saved after Integers
+    MenuRegion will be saved after that
+    
+    
+Saving maps (The complicated stuff)
+ array[] tells which maps are already in the save file and can be skipped.
+ Every region in a map is divided by a <progDivA> and the region name is divided by a <progDivB>
+ 
+ 
+ 
+ 
+Things that I would have to do:
+ Make it so that discoveredshelters for invalid regions is stored somewhere else
+ Make sure that a checksum can be regnerated
+ Change the menuregion to something else if the region is invalid
+ Save the state of invalid tokens and bring them back when they are valid (Leveltokens and sandboxtokens)
+ Save integers if any more added
+ 
+ 
+ 
+ 
+LOADING FILES (and where problems occur)
+ If the tile does not exist than progression will be given initial values?
+ (Looping for every segment divided by <progDivA>
+ If the first element of the area divided by <progDivB>
+ 
+ For some reason the lines(ProgDivA) with the header "MISCPROG" and 0 are skipped. Then the first section is passed into FromString.
+ This is reading savestate and map data (assuming)
+ Wait..zero would be returned as the key identifier for the dictionary as well??
+ 
+ In this case the input string is the second element of an array everything in a
+ <prodDivA> segment divded by <prodDivB>
+FROMSTRING:
+ A string[] is made that is form the input string split by <mpdA>
+ Array2 String[] is made from the <mpdA> segments split by <mpdB>
+ 
+ Iterate through [regionNames]
+  if the regionName is equal to what is in the file then an index(num2) is set
+  if a region exists, then it's discoveredshelters list will be loaded.
+ 
+ 
+ 
+Savestates:
+
+//Regionstates are saved for every regionState in SaveState. (or regionLoadStrings)
+REGIONSTATE <svA>
+ <svB> Divides the tag REGIONSTATE from the rest of the data
+ <rgA> Divides region loading sections
+            REGIONNAME - 2 letters for abbreviation of the region name.
+            LASTCYCLEUPDATED - The latest cycle that this region has been loaded.
+            SWARMROOMS {
+               Repeats until all of swarmRoomCounters is written
+            LINEAGES {
+               Repeats until all of the lineage counters are written
+            OBJECTS {
+               for the number of savedObjects
+            POPULATION {
+               for the number of savedPopulation
+            STICKS {
+               Location of the sticks, savedSticks
+            CONSUMEDITEMS {
+               Items that were used up
+               ConsumedItems
+            ROOMSVISITED {
+               List of rooms visited
+ <rgB> Divides region loading section tags from data.
+
+
+
+
+Loading creature communities (what apparently breaks things)
+  Look into:
+    CreatureCommunities.playerOptions[commID - CreatureCommunities.CommunityID.All, region + 1, playerNumber] = Mathf.Clamp(newLike, -1f, 1f);
+    this.loadedPlayerOpinions[commID - CreatureCommunities.CommunityID.All, region + 1, playerNumber] = Mathf.Clamp(newLike, -1f, 1f);
+
+PlayerOptions is a 3-dimensional array
+Playeroptions is initially set to be:
+ x - Enum.GetNames(typeof(CreatureCommunities.CommunityID)).length - 1
+  This gets the number of CommunityIDs (inclusive, 0 index)
+  Pretty stable, not going to change much (VAL should be 7)
+ y - session.game.rainWorld.progression.regionNames.Length + 1
+  This is probably one of the issues.
+ z - 1
+LoadedPlayerOptions is initially set to be:
+ x - playerOptions.GetLength(0)
+ y - playerOptions.GetLength(1)
+ z - playerOptions.GetLength(2)
+
+
+PlayerProgression.RegionNames:
+ Assigned on line 26
+ Assigned on line 38
+ Both in the PlayerProgression contructor
+  Should be a list of regions in regions.txt (probably modifed by CRS, but assume that this is handled properly first)
+CreatureCommunities.
+
+ISSUE LINES:
+ playerOptions[
+  x: commID - CreatureCommunities.CommunityID.All
+  y: region + 1
+  z: playerNumber]
+ loadedPlayerOptions[
+  x: commID - CreatureCommunities.CommunityID.All
+  y: region + 1
+  z: playerNumber]
+
+Different issue (THE CRASH)
+
+SaveObjects:
+ in RegionState {
+ set on line 19
+ added on line 80
+ cleared on line 282
+ added on line 298
+ }
+Look into AdaptRegionStateToWorld()
+Ok, so when you load up a region anything that is "not in a room" will be removed. Find out how rooms are chosen.
+generateoffscreenden
+
+
+----------------------------------
+Updates
+-----------------------------------
+Fixed the crash! Step 1 complete!
+- Fix the error from the consolelog
+- Fix pearl/item mixups/deletions
+

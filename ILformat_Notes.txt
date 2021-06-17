@@ -1,0 +1,109 @@
+
+//Takes a value from the stack and stores it into variable (text(4))
+214	0203	stloc.s	text (4)
+//Push the value 1 onto the stack as int32
+215	0205	ldc.i4.1
+//Pop a value from the stack and store it into a variable (flag3 is set to true)
+216	0206	stloc.s	flag3 (6)
+//load local variable 1 onto the stack (happens to be bool array[])
+217	0208	ldloc.1
+//loads num into the stack (index 9)
+218	0209	ldloc.s	num (9)
+//Pushes the value 1 onto the stack as an int32
+219	020B	ldc.i4.1
+//Replace array element at index with the int8 value on the stack.
+220	020C	stelem.i1
+//Branch to target, short form (this is the end of the if branch it is in)
+221	020D	br.s	248 (024F) ldloc.s flag3 (6)
+//Load local variable of index indx onto stack, short form.
+222	020F	ldloc.s	array2 (7)
+
+//Same stuff as before...
+214	0203	stloc.s	text (4)
+215	0205	ldc.i4.1
+216	0206	stloc.s	flag3 (6)
+//NEW THINGS!
+//Here num gets loaded in first
+217	0208	ldloc.s	num (9)
+//This gets the value for -1 and pushes it to the stack (as an int32)
+218	020A	ldc.i4.m1
+//Branch to target (251) if less than or equal to, short form.
+//Optimized, branches directly to the end of elseif branch instead of jumping into a jump statement. Pretty cool!
+219	020B	ble.s	251 (0254) ldloc.s flag3 (6)
+//THIS ONLY HAPPENS if num IS > -1
+//Loads local variable 1 (array)
+220	020D	ldloc.1
+//Loads local variable num into the stack
+221	020E	ldloc.s	num (9)
+//Pushes value 1 onto the stack as an int32
+222	0210	ldc.i4.1
+//Replace array element at index with the int16value on the stack
+223	0211	stelem.i1
+//Branch to line 251, the end of the elseif block this code is in.
+224	0212	br.s	251 (0254) ldloc.s flag3 (6)
+//ldloc.s loads array onto the stack
+225	0214	ldloc.s	array2 (7)
+
+//This is the flag3 if statement around line 320
+251	0254	ldloc.s	flag3 (6)
+252	0256	brfalse.s	257 (0266) ldloc.s i (5)
+253	0258	ldloc.s	text (4)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//Loads variable (array2
+127 ldloc.s 7
+//Pushes 0 onto the stack
+128 ldc.14.0
+//Loads the element at index onto the top of the stack (load element 0 of the array)
+129 ldelem
+//Push a string onto the stack
+130 ldstr "MAP"
+//Calls for the equality check function in String (==)
+131 call bool[mscorlib]System.String::op_Equality(string, string)
+//branch to target if the valus on stack are = false (0)
+132 brfalse 222   >> ldloc.s 7
+//Pushed -1 onto the stack
+133 ldc.i4.m1
+//pops value from the stack into the local variable 8 (num)
+134 stloc.s 8
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 

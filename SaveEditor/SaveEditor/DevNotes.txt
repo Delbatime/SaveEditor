@@ -1,0 +1,19 @@
+﻿Notes:
+------------------------
+So First a spawner's location is moved
+ That spawner is saved
+The spawner suddently has a valid position.
+ How do you find that spawner?
+
+So first a spawner's location is saved
+ Spawner is moved
+The location will have to be moved accordingly, but should result in finding the spawner?
+
+
+CopyPaste:
+After working on this for a long while I've made a version that i'm comfortable with releasing to the public!
+CustomRegionSaves is a mod that allows the game to remain playable after adding/removing custom regions!
+Objects, spawns, sticks, and consumables should remain in their correct locations/states after adding/removing custom regions!
+Creatures that spawn/have a den in a pipe that has been removed/made invalid will attempt to move into a nearby valid pipe!
+The mod should work with both CRS and merge regions.
+*Note that this mod cannot restore an already corrupted file, and should only prevent the future corruption of files that already work.

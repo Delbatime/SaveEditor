@@ -1,0 +1,14 @@
+About creature spawning:
+
+WorldLoader.GeneratePopulation(bool)
+  True? ProceedLinages: Set in startup file?
+  For spawners.count
+  FindingCreatures is called with the cntr going from startOfCreatures to endOfCreatures
+  Cntr is supposedly line number?
+  An array is the line split by :
+  If the first part is "LINEAGE"
+    AddLineageFromString(split line array)
+  Otherwise
+    AddSpawnersFromString(split line array)
+    
+Apparently you can have offscreen dens Lineage.

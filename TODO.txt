@@ -1,0 +1,4 @@
+Issues:
+ - Repeating objects in save file (Every time save file has to be saved to, saved outofregion stuff gets reused (fix by clearing at file load?) {FOR SOME REASON IT'S GONE??}
+ - Invalid creature community data on region change.
+ 
