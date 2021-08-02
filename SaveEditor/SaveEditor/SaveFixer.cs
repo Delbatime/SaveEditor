@@ -1,14 +1,12 @@
-﻿//Author:Deltatime
+﻿//Author: Deltatime
+//Progress: Need to check : {RegionState_AdaptWorlldToRegion} {RegionState_AdaptRegionStateToWorld} {PlayerProgression_WipeSaveState}
 using BepInEx;
 using System.IO;
 using System.Text.RegularExpressions;
 using System;
-//TODO - Add support for boolean arrays (SavedShelters, linages, etc.) in the save file
-//TODO - Find a fix for loading creatures in regions after a region has been loaded are supposed to. (RELATED WITH THE PREVIOUS APPARENTLY)
-//TODO8 - Allow for spawners to be corrected even if their node value is above or below the valid coordinates.
 
-// Bee's Magic code
-
+//************* Bee's Magic code to make things public **************
+#pragma warning disable CS0436 //Removes warning caused by something in here.
 using System.Security;
 using System.Security.Permissions;
 [assembly: System.Runtime.CompilerServices.IgnoresAccessChecksTo("Assembly-CSharp")]
@@ -25,19 +23,27 @@ namespace System.Runtime.CompilerServices {
         public string AssemblyName { get; }
     }
 }
+#pragma warning restore CS0436
+//*******************************************************************
 
-//End of Bee's Magic code
-namespace SaveFixer {
+//TODO - Add support for boolean arrays (SavedShelters, linages, etc.) in the save file
+//TODO - Find a fix for loading creatures in regions after a region has been loaded are supposed to. (RELATED WITH THE PREVIOUS APPARENTLY)
+//TODO - Allow for spawners to be corrected even if their node value is above or below the valid coordinates.
+//TODO - When complete change !LATEST! in comments to the current version.
+namespace CustomRegionSaves {
     [BepInPlugin("Deltatime.CustomRegionSaves", "CustomRegionSaves", SaveFixer.versionString)]
     public class SaveFixer : BaseUnityPlugin {
+        //  Version number, used in fileAssemblyVersion: (majorversion.minorversion.hotfix)
         public const string versionString = "0.1.2";
-        public const string minorVersion = "";
-        public static SFLog outputLog;
+        // Incremented for every revision/build
+        public const string  buildNumber = "9";
+        // Logger for CustomRegionSaves (outputs to SaveFixerLog.txt)
+        //TODO Switch log file to CRSaveLog.txt and to remember to delete the old one (SaveFixerLog.txt)
+        public static SFLog outputLog = new SFLog();
 
         public SaveFixer() {
-            //Init custom logger
-            outputLog = new SFLog();
-            outputLog.LogString($"##################################################\n CustomRegionSaves log v{SaveFixer.versionString}.{minorVersion}\n");
+            //Start of CustomRegionSaves log
+            outputLog.LogString($"##################################################\n CustomRegionSaves log v{SaveFixer.versionString}.{SaveFixer.buildNumber}\n");
             //IL hooks
             IL.PlayerProgression.SaveToDisk += SaveToDiskFix.IL_PlayerProgression_SaveToDisk;
             //On hooks
@@ -47,32 +53,40 @@ namespace SaveFixer {
             On.PlayerProgression.WipeSaveState += PlayerProgression_WipeSaveState;
             On.WorldLoader.GeneratePopulation += SpawnerDenFix.WorldLoader_GeneratePopulation;
         }
-        //Called when the plugin is destoryed by Unity
+
+        // Called when the plugin is destoryed by Unity. <br></br>
+        // Disposes of the outputLog stream and writes that this is the end of the log.
+#pragma warning disable IDE0051 //This is an error caused since this function is not referenced by anything in the project directly.
         void OnDestroy() {
             outputLog.LogString(" End log\n##################################################");
             outputLog.Dispose();
         }
-
-        //Should wipe the file when you press the big "reset save" button.
+#pragma warning restore IDE0051
+        //Should delete the CRsav file when you press the big "reset save" button from the options menu.
         public static void PlayerProgession_WipeAll(On.PlayerProgression.orig_WipeAll orig, PlayerProgression instance) {
             SFLogSource logger = new SFLogSource("PlayerProgession_WipeAll");
-            string filePath = SFFile.GetFilePath(instance.rainWorld);
+
+            string filePath = SFFile.GetSFPath(instance.rainWorld);
             try {
                 if (File.Exists(filePath)) {
                     File.Delete(filePath);
                     logger.Log($"Completely removed file {filePath}");
+                } else {
+                    logger.Log($"Save file {filePath} is already removed");
                 }
             } catch (Exception ex) {
                 logger.LogError("Unable to delete saveFixFile, encountered exception: " + ex.Message);
             }
             logger.EmptyLine();
+
             orig(instance);
         }
 
-        //Should wipe the file when you do "reset save" in the character menu (or when you win)
+        //Should wipe the character when you do "reset save" in the character menu (or when you win)
         public static void PlayerProgression_WipeSaveState(On.PlayerProgression.orig_WipeSaveState orig, PlayerProgression instance, int stateToDelete) {
             SFLogSource log = new SFLogSource("PlayerProgression_WipeSaveState");
-            string[] fileSavDiv = Regex.Split(SFFile.ReadFile(instance.rainWorld), "<SavDiv>");
+
+            string[] fileSavDiv = Regex.Split(SFFile.ReadSFFile(instance.rainWorld), "<SavDiv>");
             if (SFFile.GetSaveStateIndex(fileSavDiv, stateToDelete, out int saveStateIndex)) {
                 log.Log($"Clearing save state {stateToDelete}");
                 //Construct a new string with the save state removed.
@@ -83,7 +97,7 @@ namespace SaveFixer {
                     }
                 }
                 //Write to save
-                using (StreamWriter streamWriter = File.CreateText(SFFile.GetFilePath(instance.rainWorld))) {
+                using (StreamWriter streamWriter = File.CreateText(SFFile.GetSFPath(instance.rainWorld))) {
                     streamWriter.Write(outText);
                 }
             } else {
@@ -93,27 +107,32 @@ namespace SaveFixer {
             orig(instance, stateToDelete);
         }
 
-        //Fix room translations when adapting the save file to world
+        //Fix room translations when adapting the save file to world (sav >> game)
         public static void RegionState_AdaptWorldToRegionState(On.RegionState.orig_AdaptWorldToRegionState orig, RegionState instance) {
-            SFLogSource logger = new SFLogSource("RegionState_AdaptWorldToRegionState");
-            logger.Log($"Adapting world to save data: {instance.regionName} | cycle: {instance.saveState.cycleNumber}");
-            var watch = new System.Diagnostics.Stopwatch();
-            watch.Start();
+            SFLogSource l = new SFLogSource("RegionState_AdaptWorldToRegionState");
+            l.Log($"Adapting world to save data: {instance.regionName} | cycle: {instance.saveState.cycleNumber}");
+            //Check the amount of additional time CustomRegionSaves adds to the saving/loading process.
+            var watch = new System.Diagnostics.Stopwatch(); watch.Start();
+
+            //NOTE : This is where the tricky stuff starts
             SFRegionState savFix = new SFRegionState(instance);
             savFix.AdaptToSaveFile();
             savFix.ApplyRoomTranslationsToRegion();
             savFix.RecoverOutOfRegionEntities();
             string regionData = savFix.SaveToString();
             SFFile.WriteRegion(regionData, instance);
+
             watch.Stop();
-            logger.Log($"Finished adapting world to save data : {instance.regionName} in {watch.ElapsedMilliseconds}ms");
-            logger.EmptyLine();
-            orig(instance);
+            l.Log($"Finished adapting world to save data : {instance.regionName} in {watch.ElapsedMilliseconds}ms");
+            l.EmptyLine();
+
+            orig(instance); //Room translations are applied to objects before the Save data is adapted into the game
         }
 
-        //Save room translations to the save file
+        //Save room translations to the save file (game >> sav)
         public static void RegionState_AdaptRegionStateToWorld(On.RegionState.orig_AdaptRegionStateToWorld orig, RegionState instance, int playerShelter, int activeGate) {
-            orig(instance, playerShelter, activeGate);
+            orig(instance, playerShelter, activeGate); //Orig is called first since this gets saved after everything else.
+
             SFLogSource log = new SFLogSource("RegionState_AdaptRegionStateToWorld");
             log.Log($"Adapting save data to world : {instance.regionName} | cycle: {instance.saveState.cycleNumber}");
             var watch = new System.Diagnostics.Stopwatch();
@@ -128,7 +147,7 @@ namespace SaveFixer {
             log.EmptyLine();
         }
 
-
+        // ------------------------------------------------
         // Code for AutoUpdate support
         // Should be put in the main PartialityMod class.
         // Comments are optional.

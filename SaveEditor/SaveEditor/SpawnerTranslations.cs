@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace SaveFixer {
+namespace CustomRegionSaves {
     public class SpawnerTranslationManager {
         SpawnerTranslationManager(RegionState region) {
             this.region = region;

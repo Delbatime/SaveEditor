@@ -8,7 +8,7 @@ using UnityEngine;
 //TODO3: Make is so that this actually corrects the worldCoordinate
 //TODO4: Make it so that creatures won't be put into the same den unless it is the only option!
 //TODO5: Make it so that a newly loaded region won't destroy creature spawns (configurable)??
-namespace SaveFixer {
+namespace CustomRegionSaves {
     public class SFRegionState {
         
         //None of the values in SFRegionState should be null.

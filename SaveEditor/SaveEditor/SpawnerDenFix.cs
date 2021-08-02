@@ -3,7 +3,7 @@ using System;
 using UnityEngine;
 #pragma warning disable IDE0020 // Use pattern matching
 
-namespace SaveFixer {
+namespace CustomRegionSaves {
     class SpawnerDenFix {
         //Not called as of yet
         public static void WorldLoader_GeneratePopulation(On.WorldLoader.orig_GeneratePopulation orig, object self, bool fresh) {
