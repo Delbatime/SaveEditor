@@ -84,6 +84,8 @@ namespace CustomRegionSaves {
         public void LogDebug(string message) { _log.LogMessage(message, _source, " debug "); }
         public void LogWarning(string message) { _log.LogMessage(message, _source, "Warning"); }
         public void LogError(string message) { _log.LogMessage(message, _source, " ERROR "); }
+        public void LogInfo(string message) { _log.LogMessage(message, _source, " info  "); }
+        public void LogVerbose(string message) { _log.LogMessage(message, _source, "-extra"); }
         public void EmptyLine() { _log.LogString(string.Empty); }
 
         private readonly string _source;

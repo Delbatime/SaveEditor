@@ -84,7 +84,7 @@
     <Compile Include="SFLogging.cs" />
     <Compile Include="SFRegionState.cs" />
     <Compile Include="SpawnerDenFix.cs" />
-    <Compile Include="SpawnerTranslations.cs" />
+    <Compile Include="RespawnCorrector.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="DevNotes.txt" />

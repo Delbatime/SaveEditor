@@ -1,13 +1,16 @@
 ﻿//Author:Deltatime
+//Progress:: Need to check {#Region: Write} {#Region:Read}
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.IO;
+
+//CURRENT: UPDATING TO INCLUDE RESPAWNS
 
 namespace CustomRegionSaves {
     //Methods for accessing and managing the SaveFix files
     static class SFFile {
 
-        #region getPaths
+        #region Paths
         //Path of saveFix.txt for the specififed save slot
         public static string GetSFPath(int saveSlot) {
             return string.Concat(new object[] {
@@ -34,8 +37,7 @@ namespace CustomRegionSaves {
         public static string GetSFBackupPath(RainWorld rw) {
             return GetSFBackupPath(rw.options.saveSlot);
         }
-        #endregion getPaths
-
+        #endregion Paths
 
         #region Version stuff
         //Function that is supposed to change the version of a SaveFix file
@@ -115,9 +117,10 @@ namespace CustomRegionSaves {
         }
         #endregion Version stuff
 
-
+        #region read
         //Returns the contents of <ver>[1] if this file is split by a version. Will back up the file and return an empty string if <ver> div is less than 2 or if the version number is invalid.
         //Returns an empty string if the file does not exist (after creating a new file)
+        //TODO - LOW - Check that Field RW is needed in all of the functions that take it, if not then make it require the more specific class.
         public static string ReadSFFile(RainWorld rw) {
             SFLogSource log = new SFLogSource("SFFile::ReadSFFile");
 
@@ -145,6 +148,7 @@ namespace CustomRegionSaves {
             log.LogError("Version was invalid, creating a backup before clearing current file.");
             try {
                 if (verSplit.Length > 1) {
+                    log.LogError("Reason: Incompatible version!");
                     File.WriteAllText(SFFile.GetSFBackupPath(rw), string.Concat(new object[] { verSplit[0], "<ver>", verSplit[1] }));
                 } else {
                     log.LogError("Reason: Expected at least 2 elements divided by <ver>");
@@ -212,7 +216,7 @@ namespace CustomRegionSaves {
             int? output = null;
             if (regions != null && regionName != null) {
                 for (int i = 0; i < regions.Length; ++i) {
-                    log.Log("Dumping full region text: " + regions[i]);
+                    log.LogVerbose("Dumping full region text: " + regions[i]);
                     string[] regionNameDiv = Regex.Split(regions[i], "<nDiv>");
                     if (regionNameDiv.Length >= 2) {
                         if (regionNameDiv[0].Equals(regionName)) {
@@ -233,7 +237,7 @@ namespace CustomRegionSaves {
         //Regions in a save state's data are divided by <rDiv>, and then (name | data) by <nDiv>
         public static string RegionTextFromString(string saveStateText, string regionName) {
             SFLogSource log = new SFLogSource("SFFile::GetRegion");
-            log.Log("Dumping savestateText: " + saveStateText);
+            log.LogVerbose("Dumping savestateText: " + saveStateText);
             string[] regionsArray = Regex.Split(saveStateText, "<rDiv>");
             if (GetRegionIndex(regionsArray, regionName, out int regionIndex)) {
                 return Regex.Split(regionsArray[regionIndex], "<nDiv>")[1];
@@ -253,7 +257,9 @@ namespace CustomRegionSaves {
                 return string.Empty;
             }
         }
+        #endregion read
 
+        #region write
         //Writes all of the region data to the saveFix file
         //Contents of regionData is irrelevant to this function, although trying to load something incorrect will prevent the SFRegionState from loading
         public static void WriteRegion(string regionData, RegionState region) {
@@ -294,7 +300,7 @@ namespace CustomRegionSaves {
                 }
             }
             saveStateData = string.Concat(region.world.game.StoryCharacter, "<iDiv>", saveStateData);
-            log.Log("Dumping saveStateText: " + saveStateData);
+            log.LogDebug("Dumping saveStateText: " + saveStateData);
             if (!makeNewSaveState) {
                 saveStateDiv[savDivIndex] = saveStateData;
             }
@@ -321,5 +327,7 @@ namespace CustomRegionSaves {
                 streamWriter.Write(outputText);
             }
         }
+        #endregion write
+
     }
 }

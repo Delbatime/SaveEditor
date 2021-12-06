@@ -1,4 +1,5 @@
 ﻿//Author:Deltatime
+//Progress: NONE
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
@@ -12,34 +13,49 @@ namespace CustomRegionSaves {
     public class SFRegionState {
         
         //None of the values in SFRegionState should be null.
-        public SFRegionState(RegionState saveFixRegion) { 
+        public SFRegionState(RegionState saveFixRegion) {
+            respawnFixer = new RespawnCorrector();
             roomTranslations = new List<RoomTranslation>();
             outOfRegionObjects = new List<OutOfRegionEntity>();
             outOfRegionPopulation = new List<OutOfRegionEntity>();
             outOfRegionSticks = new List<OutOfRegionEntity>();
             outOfRegionConsumedItems = new List<OutOfRegionEntity>();
-            region = saveFixRegion;
+            regionState = saveFixRegion;
         }
 
-        public void AdaptToSaveFile() {
-            SFLogSource log = new SFLogSource("SFRegionState::AdaptToSaveFile");
-            log.Log($"Updating SFRegionState to match data in saveFix.txt for region {region.regionName}");
-            string regionText = SFFile.ReadRegion(region);
+        //Loads the CRsavedata for the region associated with the regionstate that the SFRegionState was created with.
+        //Region data is divided by <aDiv>
+        //Result from readRegion(): (things in [] are elements/values rather than separators)
+        //[0] - Roomshifts in region
+        //<aDiv>
+        //[1] - Lost entities in region
+        //<aDiv>
+        //[2] - Respawns in region
+        public void LoadCRsavedata() {
+            SFLogSource log = new SFLogSource("SFRegionState::LoadCRSavedata");
+            log.Log("Loading CRSave data for region...");
+            string regionText = SFFile.ReadRegion(regionState);
             if (!string.IsNullOrEmpty(regionText)) {
-                string[] regiondataSections = Regex.Split(regionText, "<aDiv>");  //Every type of region data is divided by <aDiv> [RoomTranslations-OutOfRegionObjects-(TODO booleanArrayTranslations)]
+                string[] regiondataSections = Regex.Split(regionText, "<aDiv>");
                 for (int i = 0; i < regiondataSections.Length; ++i) {
                     string[] regiondataSectionIdSplit = Regex.Split(regiondataSections[i], "<idA>"); //The data in a section and the id of a section is divided by a '|' character
                     if (regiondataSectionIdSplit.Length >= 2) {
                         if (int.TryParse(regiondataSectionIdSplit[0], out int sectionId)) {
                             switch (sectionId) {
                                 case 0:
-                                    log.Log("Dumping what is being passed to adaptTranslationsFromString: " + regiondataSectionIdSplit[1]);
-                                    AdaptTranslationsFromString(regiondataSectionIdSplit[1], true);
+                                    log.LogVerbose("Dumping what is being passed to adaptTranslationsFromString: " + regiondataSectionIdSplit[1]);
+                                    LoadRoomShiftsFromString(regiondataSectionIdSplit[1], true);
                                     break;
                                 case 1:
-                                    log.Log("Dumping what is being passed to adaptOutOfRegionEntitiesFromString: " + regiondataSectionIdSplit[1]);
-                                    AdaptOutOfRegionEntitiesFromString(regiondataSectionIdSplit[1], true);
+                                    log.LogVerbose("Dumping what is being passed to adaptOutOfRegionEntitiesFromString: " + regiondataSectionIdSplit[1]);
+                                    LoadOutOfRegionEntitiesFromString(regiondataSectionIdSplit[1], true);
                                     break;
+                                case 2:
+                                    log.LogVerbose("Respawns as String: " + regiondataSectionIdSplit[1]);
+                                    respawnFixer.RespawnsFromString(regiondataSectionIdSplit[1]);
+                                    break;
+                                //To add more elements, add a new case here!
+                                //Don't forget to add one to the write function
                             }
                         } else {
                             log.LogWarning($"Expected first element of division '|' to be an integer in regionDataSection {i}");
@@ -49,78 +65,103 @@ namespace CustomRegionSaves {
                     }
                 }
             } else {
-                log.LogWarning($"Could not get region {region.regionName} from save file");
+                log.LogWarning($"Could not get region {regionState.regionName} from save file");
             }
         }
         
-        //Takes in a string array of only translations
-        public void AdaptTranslationsFromString(string translations, bool clear) {
-            SFLogSource log = new SFLogSource("SFRegionState::AdaptTranslationsFromString");
-            log.Log($"Updating saveFixState roomTranslations to match with the current save file data ({region.regionName})");
-            if (string.IsNullOrEmpty(translations)) {
-                log.LogError("input translations string is empty or null");
+        //Takes in a string with the following formatting: (things in [] are elements/values rather than separators)
+        // [0] - Unshifted room index (roomFrom)
+        //  :
+        // [1] - Name of the room for the above mentioned index.
+        // <tDiv>
+        //If the room name of a roomShift cannot be matched then it is counted as "lost" and not have a shift destinition. These translations are not saved in the next file.
+        //If the formatting of the string is invalid that roomShift will be not be saved in the next file.
+        public void LoadRoomShiftsFromString(string roomShiftDataString, bool clear) {
+            SFLogSource log = new SFLogSource("SFRegionState::CreateRoomShiftsFromString");
+            if (string.IsNullOrEmpty(roomShiftDataString)) {
+                log.LogError("Input string is empty or null");
                 return;
             }
             if (clear) {
                 roomTranslations.Clear();
-                log.Log("Cleared previous translations");
+                log.Log("Cleared previous roomShifts.");
             }
-            string[] roomTranslationStrings = Regex.Split(translations, "<tDiv>");
-            log.Log("Number of translations to load: " + roomTranslationStrings.Length);
+            string[] roomTranslationStrings = Regex.Split(roomShiftDataString, "<tDiv>");
+            log.Log("Loading room shifts from CRsaves file. Count:" + roomTranslationStrings.Length);
+            int loadedShifts = 0;
+            int lostShifts = 0;
+            int failedShifts = 0;
             for (int i = 0; i < roomTranslationStrings.Length; ++i) {
-                string[] translationSplit = roomTranslationStrings[i].Split(new char[] { ':' });
-                if (translationSplit.Length >= 2) {
-                    if (int.TryParse(translationSplit[0], out int roomFrom)) {
+                string[] stringSplit = roomTranslationStrings[i].Split(new char[] { ':' });
+                if (stringSplit.Length >= 2) {
+                    if (int.TryParse(stringSplit[0], out int roomFrom)) {
                         bool foundRoomTo = false;
-                        for (int r = region.world.firstRoomIndex; r < region.world.firstRoomIndex + region.world.NumberOfRooms; ++r) {
-                            AbstractRoom roomInRegion = region.world.GetAbstractRoom(r);
-                            if (roomInRegion != null && translationSplit[1].Equals(roomInRegion.name)) {
-                                RoomTranslation newTranslation = new RoomTranslation(roomFrom, translationSplit[1], r);
+                        for (int r = regionState.world.firstRoomIndex; r < regionState.world.firstRoomIndex + regionState.world.NumberOfRooms; ++r) {
+                            AbstractRoom roomInRegion = regionState.world.GetAbstractRoom(r);
+                            if (roomInRegion != null && stringSplit[1].Equals(roomInRegion.name)) {
+                                RoomTranslation newTranslation = new RoomTranslation(roomFrom, stringSplit[1], r);
                                 roomTranslations.Add(newTranslation);
-                                log.Log($"Added new translation {newTranslation.ToString()}");
                                 foundRoomTo = true;
+                                ++loadedShifts;
+                                log.LogVerbose($"Loaded room shift {newTranslation}");
                             }
                         }
                         if (!foundRoomTo) {
-                            RoomTranslation newTranslation = new RoomTranslation(roomFrom, translationSplit[1]);
+                            RoomTranslation newTranslation = new RoomTranslation(roomFrom, stringSplit[1]);
                             roomTranslations.Add(newTranslation);
-                            log.Log($"Added new invalid translation: {newTranslation.ToString()}");
+                            log.LogVerbose($"Loaded lost room shift: {newTranslation}");
+                            ++lostShifts;
                         }
                     } else {
-                        log.LogWarning($"Translation {i} des not have a valid format (expected integer for first value of elements divided by ':'): skipping...");
+                        log.LogWarning($"Room shift {i} des not have a valid format (expected integer for first value of elements divided by ':'): skipping...");
+                        shouldCreateBackup = true;
+                        ++failedShifts;
                     }
                 } else {
-                    log.LogWarning($"Translation {i} does not have a valid format (expected 2 elements divided by ':'): skipping...");
+                    log.LogWarning($"Room shift {i} does not have a valid format (expected 2 elements divided by ':'): skipping...");
+                    shouldCreateBackup = true;
+                    ++failedShifts;
                 }
             }
+            log.Log($"Loaded room shifts from CRSave file | Completed: {loadedShifts} Lost: {lostShifts} Failed: {failedShifts} Total: {roomTranslationStrings.Length}");
         }
+
         //Requires a string without the name of the dataSection
-        public void AdaptOutOfRegionEntitiesFromString(string outOfRegionDataString, bool clear) {
+        //There are 4 types of outOfRegionEntities
+        //Takes in a string with the following formatting: (things in [] are elements/values rather than separators)
+        //[] - ID number for out of region objects type (0 - Object, 1 - Population, 2 - sticks, 3 - Consumables)
+        //<idB> - division between id and data
+        //[] - LostRoomName
+        //:
+        //[] - EntitiyData
+        //<eDiv> - out of region entity division
+        //<bDiv> - out of region entity type division
+        public void LoadOutOfRegionEntitiesFromString(string outOfRegionDataString, bool clear) {
             SFLogSource log = new SFLogSource("SFRegionState::AdaptOutOfRegionEntitiesFromString");
-            log.Log($"Updating SaveFixState outOfRegionEntities to match with the current save file data ({region.regionName})");
+            log.Log($"Loading OutOfRegionEntities from CRsaves file");
             string[] loadedOutOfRegionTypes = Regex.Split(outOfRegionDataString, "<bDiv>");
-            log.Log($"{loadedOutOfRegionTypes.Length} types of outOfRegionEntities in file");
+            log.LogDebug($"{loadedOutOfRegionTypes.Length} categories of outOfRegionEntities in file");
             for (int i = 0; i < loadedOutOfRegionTypes.Length; ++i) {
                 string[] outOfRegionTypeIdSplit = Regex.Split(loadedOutOfRegionTypes[i], "<idB>");
-                if (outOfRegionTypeIdSplit.Length >= 2) {
+                if (outOfRegionTypeIdSplit.Length >= 3) {
                     if (int.TryParse(outOfRegionTypeIdSplit[0], out int outOfRegionTypeId)) {
                         List<OutOfRegionEntity> outOfRegionEntityList = null;
                         switch (outOfRegionTypeId) {
                             case 0:
                                 outOfRegionEntityList = outOfRegionObjects;
-                                log.Log("Selecting object list");
+                                log.LogDebug("Selecting object list");
                                 break;
                             case 1:
                                 outOfRegionEntityList = outOfRegionPopulation;
-                                log.Log("Selecting population list");
+                                log.LogDebug("Selecting population list");
                                 break;
                             case 2:
                                 outOfRegionEntityList = outOfRegionSticks;
-                                log.Log("Selecting stick list");
+                                log.LogDebug("Selecting stick list");
                                 break;
                             case 3:
                                 outOfRegionEntityList = outOfRegionConsumedItems;
-                                log.Log("Selecting consumedItems list");
+                                log.LogDebug("Selecting consumedItems list");
                                 break;
                         }
                         if (outOfRegionEntityList != null) {
@@ -132,89 +173,97 @@ namespace CustomRegionSaves {
                                 string[] outOfRegionEntityAsArray = outOfRegionEntityStrings[a].Split( new char[] { ':' });
                                 if (outOfRegionEntityAsArray.Length >= 2) {
                                     outOfRegionEntityList.Add(new OutOfRegionEntity(outOfRegionEntityAsArray[0], outOfRegionEntityAsArray[1]));
-                                    log.Log($"Added outOfRegionEntity to outOfRegionEntityList{outOfRegionTypeId}, dumping - {outOfRegionEntityAsArray[0]} : {outOfRegionEntityAsArray[1]}");
+                                    log.LogVerbose($"Added outOfRegionEntity to list{outOfRegionTypeId}, dumping - {outOfRegionEntityAsArray[0]} : {outOfRegionEntityAsArray[1]}");
                                 } else {
                                     log.LogWarning($"Could not read outOfRegionEntity index {a} in type {i}, expected to have 2 elements divided by ':'");
+                                    shouldCreateBackup = true;
                                 }
                             }
                         } else {
-                            log.LogWarning($"There is no support for outOfRegionEntityType with an id of {outOfRegionTypeId}");
+                            log.LogWarning($"There is no support for outOfRegionEntityType with an id of {outOfRegionTypeId}. Potential file corruption or invalid version.");
+                            shouldCreateBackup = true;
                         }
                     } else {
-                        log.LogWarning($"Expected value 0 in outOfRegionData {i} split by <idB>  to be an integer");
+                        log.LogWarning($"Expected value 0 in outOfRegionData {i} split by <idB>  to be an integer. Potential file corruption.");
+                        shouldCreateBackup = true;
                     }
                 } else {
-                    log.LogError($"could not read outOfRegionType {i}, expected to have 2 elements divived by <idB>");
+                    log.LogError($"could not read outOfRegionType {i}, expected to have 2 elements divived by <idB>. Potential file corruption");
+                    shouldCreateBackup = true;
                 }
             }
-            //DEBUG
+
             for (int i = 0; i < outOfRegionObjects.Count; ++i) {
-                log.Log($"Dumping outOfRegionObjects{i}: {outOfRegionObjects[i].ToString()}");
+                log.LogVerbose($"Dumping outOfRegionObjects{i}: {outOfRegionObjects[i]}");
             }
             for (int i = 0; i < outOfRegionPopulation.Count; ++i) {
-                log.Log($"Dumping outOfRegionPopulation{i}: {outOfRegionPopulation[i].ToString()}");
+                log.LogVerbose($"Dumping outOfRegionPopulation{i}: {outOfRegionPopulation[i]}");
             }
             for (int i = 0; i < outOfRegionSticks.Count; ++i) {
-                log.Log($"Dumping outOfRegionSticks{i}: {outOfRegionSticks[i].ToString()}");
+                log.LogVerbose($"Dumping outOfRegionSticks{i}: {outOfRegionSticks[i]}");
             }
             for (int i = 0; i < outOfRegionConsumedItems.Count; ++i) {
-                log.Log($"Dumping outOfRegionConsumedItems{i}: {outOfRegionConsumedItems.ToString()}");
+                log.LogVerbose($"Dumping outOfRegionConsumedItems{i}: {outOfRegionConsumedItems}");
             }
         }
 
-        //Corrects the translations of all objects, population, and sticks in that region to whatever the corresponding room translations have
-        //Does not do anything with bringing back invalid objects yet TODO: Invalid objects
-        public void ApplyRoomTranslationsToRegion() {
-            SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomTranslationsToRegion");
-            log.Log($"Applying room translations to region (name:{region.regionName} firstroom:{region.world.firstRoomIndex} size:{region.world.NumberOfRooms})");
-            ApplyRoomTranslationsToObjects();
-            ApplyRoomTranslationsToPopulation();
+        //Fixes RoomShifts, objects, population, sticks, and consumables, and attempts to restore out of region objects.
+        //Fixes respawns
+        //TODO: Restore invalid objects
+        public void FixRegion() {
+            SFLogSource log = new SFLogSource("SFRegionState::FixRegion");
+            log.Log($"Fixing region (name:{regionState.regionName} firstroom:{regionState.world.firstRoomIndex} size:{regionState.world.NumberOfRooms})");
+            ApplyRoomShiftsToObjects();
+            ApplyRoomShiftsToPopulation();
             ApplyRoomTranslationsToSticks();
             ApplyRoomTranslationsToConsumables();
-            log.Log($"Out of region (objects | population | sticks | consumables) amount : ({outOfRegionObjects.Count} | {outOfRegionPopulation.Count} | {outOfRegionSticks.Count} | {outOfRegionConsumedItems.Count})");
-            log.Log("Finished applying translations to region");
+            log.Log($"Finished Fixing region. Out of region (objects | population | sticks | consumables) total count : ({outOfRegionObjects.Count} | {outOfRegionPopulation.Count} | {outOfRegionSticks.Count} | {outOfRegionConsumedItems.Count})");
         }
 
-        void ApplyRoomTranslationsToObjects() {
-            SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomTranslationsToObjects");
-            log.Log($"savedObjects amount: {region.savedObjects.Count}");
-            for (int i = 0; i < region.savedObjects.Count; ++i) {
-                log.Log($"Dumping original object data: {region.savedObjects[i]}");
-                AbstractPhysicalObject abstractObject = SaveState.AbstractPhysicalObjectFromString(region.world, region.savedObjects[i]);
+        //TODO : Add more documentation to the ApplyRoomShift functions (and maybe encapsulate them into their own file).
+
+        void ApplyRoomShiftsToObjects() {
+            SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomShiftsToObjects");
+            log.Log($"savedObjects count: {regionState.savedObjects.Count}");
+            for (int i = 0; i < regionState.savedObjects.Count; ++i) {
+                log.LogVerbose($"Dumping original object data: {regionState.savedObjects[i]}");
+                AbstractPhysicalObject abstractObject = SaveState.AbstractPhysicalObjectFromString(regionState.world, regionState.savedObjects[i]);
                 if (abstractObject != null) {
                     bool didAction = false;
                     for (int rt = 0; rt < roomTranslations.Count; ++rt) {
                         if (abstractObject.pos.room == roomTranslations[rt].roomFrom) {
                             if (roomTranslations[rt].roomTo != null) {
                                 abstractObject.pos.room = roomTranslations[rt].roomTo ?? -1;
-                                region.savedObjects[i] = abstractObject.ToString();
-                                log.Log($"Found matching translation for object! Dumping edited object data: {region.savedObjects[i]}");
+                                regionState.savedObjects[i] = abstractObject.ToString();
+                                log.LogVerbose($"Found matching translation for object! Dumping edited object data: {regionState.savedObjects[i]}");
                             } else {
-                                log.Log($"Found object matching with invalid translation {roomTranslations[rt].roomName} ({roomTranslations[rt].roomFrom}), adding to invalid objects!");
-                                outOfRegionObjects.Add(new OutOfRegionEntity(roomTranslations[rt].roomName, region.savedObjects[i]));
-                                region.savedObjects[i] = null;
+                                log.LogInfo($"Object matches with lost roomShift {roomTranslations[rt].roomName} ({roomTranslations[rt].roomFrom}), adding to invalid objects!");
+                                outOfRegionObjects.Add(new OutOfRegionEntity(roomTranslations[rt].roomName, regionState.savedObjects[i]));
+                                regionState.savedObjects[i] = null;
                             }
                             didAction = true;
                             break;
                         }
                     }
                     if (!didAction) {
-                        log.LogWarning($"Could not find any matching translations, object {i} will stay at the original value");
+                        log.LogInfo($"Could not find any matching translations, object {i} will stay at the original value");
                     }
                 } else {
-                    log.LogError($"Failed to create object from savedString {i}");
+                    log.LogWarning($"Failed to create object from savedString: {i}");
+                    shouldCreateBackup = true;
                 }
             }
             //Remove any null savedObjects
-            region.savedObjects.RemoveAll(x => { return x == null; });
+            regionState.savedObjects.RemoveAll(x => { return x == null; });
         }
 
-        void ApplyRoomTranslationsToPopulation() {
-            SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomTranslationsToPopulation");
-            log.Log($"savedPopulation amount: {region.savedPopulation.Count}");
-            for (int i = 0; i < region.savedPopulation.Count; ++i) {
-                log.Log($"orig creature data: {region.savedPopulation[i]}");
-                string[] creatureData = Regex.Split(region.savedPopulation[i], "<cA>");
+        void ApplyRoomShiftsToPopulation() {
+            SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomShiftsToPopulation");
+            log.Log($"savedPopulation amount: {regionState.savedPopulation.Count}");
+            //What is this part for?
+            for (int i = 0; i < regionState.savedPopulation.Count; ++i) {
+                log.LogVerbose($"orig creature data: {regionState.savedPopulation[i]}");
+                string[] creatureData = Regex.Split(regionState.savedPopulation[i], "<cA>");
                 if (creatureData.Length >= 3) {
                     string[] creatureWorldCoordinateSplit = creatureData[2].Split(new char[] { '.' });
                     if (creatureWorldCoordinateSplit.Length >= 2) {
@@ -233,37 +282,41 @@ namespace CustomRegionSaves {
                                                 correctedCreatureString = string.Concat(new object[] { correctedCreatureString, "<cA>" });
                                             }
                                         }
-                                        region.savedPopulation[i] = correctedCreatureString;
-                                        log.Log($"Found matching translation for creature population! Edited population data: {region.savedPopulation[i]}");
-                                    } else {
-                                        OutOfRegionEntity invalidCreature = new OutOfRegionEntity(roomTranslations[rt].roomName, region.savedPopulation[i]);
+                                        regionState.savedPopulation[i] = correctedCreatureString;
+                                        log.LogVerbose($"-new creature data: {regionState.savedPopulation[i]}");
+                                    } else { //Add an out of region creature
+                                        OutOfRegionEntity invalidCreature = new OutOfRegionEntity(roomTranslations[rt].roomName, regionState.savedPopulation[i]);
                                         outOfRegionPopulation.Add(invalidCreature);
-                                        region.savedPopulation[i] = null;
-                                        log.Log($"Adding new invalid population entry: {invalidCreature.ToString()}");
+                                        regionState.savedPopulation[i] = null;
+                                        log.Log($"Adding new out of region population entry: {invalidCreature}");
                                     }
                                     didAction = true;
                                     break;
                                 }
                             }
                             if (!didAction) {
-                                log.LogWarning($"Unable to find any matching translations for creature, no actions will be done");
+                                log.LogInfo($"Unable to find any matching translations for creature, no actions will be done");
                             }
                         } else {
-                            log.LogError("Failed reading creature worldCoordinate, expected integer value");
+                            log.LogWarning("Failed reading creature worldCoordinate, expected integer value");
+                            shouldCreateBackup = true;
                         }
                     } else {
-                        log.LogError("Failed reading creature worldcoordinate: expected at least 2 values to be split by '.'");
+                        log.LogWarning("Failed reading creature worldcoordinate: expected at least 2 values to be split by '.'");
+                        shouldCreateBackup = true;
                     }
                 } else {
-                    log.LogError("Failed creature read: Not enough indexes to read room at index [2]");
+                    log.LogWarning("Failed creature read: Not enough indexes to read room at index [2]");
+                    shouldCreateBackup = true;
                 }
             }
             //Remove any null savedPopulation
-            region.savedPopulation.RemoveAll(x => { return x == null; });
-            //Now fix creature den positions
+            regionState.savedPopulation.RemoveAll(x => { return x == null; });
+
+            //Now fix creature den positions (this is in case a creature has a spawn in a den that doesnt exist?
             log.Log("Correcting Abstract node for creature dens:");
-            for (int i = 0; i < region.savedPopulation.Count; ++i) {
-                string[] creatureData = Regex.Split(region.savedPopulation[i], "<cA>");
+            for (int i = 0; i < regionState.savedPopulation.Count; ++i) {
+                string[] creatureData = Regex.Split(regionState.savedPopulation[i], "<cA>");
                 if (creatureData.Length >= 3) {
                     string[] creatureWorldCoordinateSplit = creatureData[2].Split(new char[] { '.' });
                     if (creatureWorldCoordinateSplit.Length >= 2) {
@@ -278,7 +331,7 @@ namespace CustomRegionSaves {
                                     correctedCreatureString = string.Concat(new object[] { correctedCreatureString, "<cA>" });
                                 }
                             }
-                            region.savedPopulation[i] = correctedCreatureString;
+                            regionState.savedPopulation[i] = correctedCreatureString;
                         } else {
                             log.LogError("Failed reading creature worldCoordinate (abstractNodes), expected integer value");
                         }
@@ -293,10 +346,10 @@ namespace CustomRegionSaves {
 
         void ApplyRoomTranslationsToSticks() {
             SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomTranslationsToSticks");
-            log.Log($"savedSticks amount: {region.savedSticks.Count}");
-            for (int i = 0; i < region.savedSticks.Count; ++i) {
-                log.Log($"orig stick data: {region.savedSticks[i]}");
-                string[] stickData = Regex.Split(region.savedSticks[i], "<stkA>");
+            log.Log($"savedSticks amount: {regionState.savedSticks.Count}");
+            for (int i = 0; i < regionState.savedSticks.Count; ++i) {
+                log.Log($"orig stick data: {regionState.savedSticks[i]}");
+                string[] stickData = Regex.Split(regionState.savedSticks[i], "<stkA>");
                 if (stickData.Length >= 1) {
                     if (int.TryParse(stickData[0], out int StickRoom)) {
                         bool didAction = false;
@@ -311,12 +364,12 @@ namespace CustomRegionSaves {
                                             correctedStickData = string.Concat(new object[] { correctedStickData, "<stkA>" });
                                         }
                                     }
-                                    region.savedSticks[i] = correctedStickData;
-                                    log.Log($"Found matching translation for stick! Edited stick data: {region.savedSticks[i]}");
+                                    regionState.savedSticks[i] = correctedStickData;
+                                    log.Log($"Found matching translation for stick! Edited stick data: {regionState.savedSticks[i]}");
                                 } else {
-                                    OutOfRegionEntity invalidStick = new OutOfRegionEntity(roomTranslations[rt].roomName, region.savedPopulation[i]);
+                                    OutOfRegionEntity invalidStick = new OutOfRegionEntity(roomTranslations[rt].roomName, regionState.savedPopulation[i]);
                                     outOfRegionSticks.Add(invalidStick);
-                                    region.savedSticks[i] = null;
+                                    regionState.savedSticks[i] = null;
                                     log.Log($"Adding new invalid Stick entry: {invalidStick}");
                                 }
                                 didAction = true;
@@ -334,25 +387,25 @@ namespace CustomRegionSaves {
                 }
             }
             //Remove any null sticks
-            region.savedSticks.RemoveAll(x => { return x == null; });
+            regionState.savedSticks.RemoveAll(x => { return x == null; });
         }
 
         void ApplyRoomTranslationsToConsumables() {
             SFLogSource log = new SFLogSource("SFRegionState::ApplyRoomTranslationsToConsumables");
-            log.Log($"SavedConsumables amount: {region.consumedItems.Count}");
-            for (int i = 0; i < region.consumedItems.Count; ++i) {
-                log.Log($"Orig consumable data: {region.consumedItems[i].ToString()}");
-                if (region.consumedItems[i] != null) {
+            log.Log($"SavedConsumables amount: {regionState.consumedItems.Count}");
+            for (int i = 0; i < regionState.consumedItems.Count; ++i) {
+                log.Log($"Orig consumable data: {regionState.consumedItems[i].ToString()}");
+                if (regionState.consumedItems[i] != null) {
                     bool didAction = false;
                     for (int rt = 0; rt < roomTranslations.Count; ++rt) {
-                        if (region.consumedItems[i] != null && region.consumedItems[i].originRoom == roomTranslations[rt].roomFrom) {
+                        if (regionState.consumedItems[i] != null && regionState.consumedItems[i].originRoom == roomTranslations[rt].roomFrom) {
                             if (roomTranslations[rt].roomTo != null) {
-                                region.consumedItems[i].originRoom = roomTranslations[rt].roomTo ?? -1;
-                                log.Log($"Found matching translation for consumable! Edited consumable data: {region.consumedItems[i].ToString()}");
+                                regionState.consumedItems[i].originRoom = roomTranslations[rt].roomTo ?? -1;
+                                log.Log($"Found matching translation for consumable! Edited consumable data: {regionState.consumedItems[i].ToString()}");
                             } else {
                                 log.Log($"Found consumable matching with invalid translation {roomTranslations[rt].roomName} ({roomTranslations[rt].roomFrom}), adding to invalid consumables!");
-                                outOfRegionConsumedItems.Add(new OutOfRegionEntity(roomTranslations[rt].roomName, region.consumedItems[i].ToString()));
-                                region.consumedItems[i] = null;
+                                outOfRegionConsumedItems.Add(new OutOfRegionEntity(roomTranslations[rt].roomName, regionState.consumedItems[i].ToString()));
+                                regionState.consumedItems[i] = null;
                             }
                             didAction = true;
                             break;
@@ -365,7 +418,7 @@ namespace CustomRegionSaves {
                     log.LogError("ConsumedItem is null");
                 }
             }
-            region.consumedItems.RemoveAll(x => { return x == null; });
+            regionState.consumedItems.RemoveAll(x => { return x == null; });
         }
 
         public bool IsDuplicateInRoomTranslation(int roomNumber) {
@@ -428,14 +481,15 @@ namespace CustomRegionSaves {
             log.Log($"outOfRegionEntities to string: [{output}]");
             return output;
         }
+
         //    <nDiv>    <aDiv>    <idA>
         public string SaveToString() {
             SFLogSource log = new SFLogSource("SFRegionState::SaveToString");
             log.Log("Saving SFRegionState to string...");
             string output = string.Empty;
-            output = string.Concat(new object[] { region.regionName, "<nDiv>"});
+            output = string.Concat(new object[] { regionState.regionName, "<nDiv>"});
             List<string> validAddedStrings = new List<string>();
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < 3; ++i) {
                 string addedString = string.Empty;
                 switch(i) {
                     case 0:
@@ -443,6 +497,9 @@ namespace CustomRegionSaves {
                         break;
                     case 1:
                         addedString = OutOfRegionEntitiesToString();
+                        break;
+                    case 2:
+                        addedString = respawnFixer.GameRespawnsToString(regionState);
                         break;
                 }
                 if (!string.IsNullOrEmpty(addedString)) {
@@ -467,27 +524,28 @@ namespace CustomRegionSaves {
         public void AdaptTranslationsToWorld() {
             SFLogSource log = new SFLogSource("SFRegionState::AdaptTranslationsToWorld");
             roomTranslations.Clear();
-            log.Log($"Updating saveFixState roomTranslations to match with the current region data in region ({region.regionName})");
-            log.Log("Number of savedObjects: " + region.savedObjects.Count);
-            log.Log("Number of savedPopulations: " + region.savedPopulation.Count);
-            log.Log("Number of savedSticks: " + region.savedSticks.Count);
-            log.Log("Number of consumeables: " + region.consumedItems.Count);
+            log.Log($"Updating saveFixState roomTranslations to match with the current region data in region ({regionState.regionName})");
+            log.Log("Number of savedObjects: " + regionState.savedObjects.Count);
+            log.Log("Number of savedPopulations: " + regionState.savedPopulation.Count);
+            log.Log("Number of savedSticks: " + regionState.savedSticks.Count);
+            log.Log("Number of consumeables: " + regionState.consumedItems.Count);
+            log.LogInfo("Number of respawns: " + (regionState.saveState.respawnCreatures.Count + regionState.saveState.waitRespawnCreatures.Count));
             int? lastAddedRoom = null;
             for (int listSelect = 0; listSelect < 4; ++listSelect) {
                 ReadOnlyCollection<string> savedEntityList = null;
                 int? nonStringListCount = null;
                 switch (listSelect) {
                     case 0:
-                        savedEntityList = region.savedObjects.AsReadOnly();
+                        savedEntityList = regionState.savedObjects.AsReadOnly();
                         break;
                     case 1:
-                        savedEntityList = region.savedPopulation.AsReadOnly();
+                        savedEntityList = regionState.savedPopulation.AsReadOnly();
                         break;
                     case 2:
-                        savedEntityList = region.savedSticks.AsReadOnly();
+                        savedEntityList = regionState.savedSticks.AsReadOnly();
                         break;
                     case 3:
-                        nonStringListCount = region.consumedItems.Count;
+                        nonStringListCount = regionState.consumedItems.Count;
                         break;
                 }
                 log.Log($"Iteration count: {(nonStringListCount == null ? savedEntityList.Count : nonStringListCount ?? -1)}");
@@ -499,7 +557,7 @@ namespace CustomRegionSaves {
                             //Search for the roomNumber of the savedEntity
                             switch (listSelect) {
                                 case 0: //Object
-                                    AbstractPhysicalObject tempObject = SaveState.AbstractPhysicalObjectFromString(region.world, savedEntityList[i]);
+                                    AbstractPhysicalObject tempObject = SaveState.AbstractPhysicalObjectFromString(regionState.world, savedEntityList[i]);
                                     if (tempObject != null) {
                                         entityRoomNumber = tempObject.pos.room;
                                     } else {
@@ -537,13 +595,13 @@ namespace CustomRegionSaves {
                     } else { //Non-string lists
                         switch (listSelect) {
                             case 3: //Consumables
-                                log.Log($"Entity {i} in list {listSelect} dump: {region.consumedItems[i].ToString()}");
-                                entityRoomNumber = region.consumedItems[i].originRoom;
+                                log.Log($"Entity {i} in list {listSelect} dump: {regionState.consumedItems[i].ToString()}");
+                                entityRoomNumber = regionState.consumedItems[i].originRoom;
                                 break;
                         }
                     }
                     if (entityRoomNumber != null) {
-                        AbstractRoom entityRoom = region.world.GetAbstractRoom(entityRoomNumber ?? -1);
+                        AbstractRoom entityRoom = regionState.world.GetAbstractRoom(entityRoomNumber ?? -1);
                         if (entityRoom != null) {
                             if (lastAddedRoom != entityRoomNumber && !IsDuplicateInRoomTranslation(entityRoomNumber ?? -1)) {
                                 log.Log($"Creating room translation for room {entityRoom.name} ({entityRoomNumber})");
@@ -553,12 +611,24 @@ namespace CustomRegionSaves {
                                 log.Log($"Entity {i} in list {listSelect} is has a duplicate room number, not creating translation for this entity...");
                             }
                         } else {
-                            log.LogWarning($"Entity {i} in list {listSelect} is outside of region {region.regionName} (#{entityRoomNumber}), not creating translation for this entity...");
+                            log.LogWarning($"Entity {i} in list {listSelect} is outside of region {regionState.regionName} (#{entityRoomNumber}), not creating translation for this entity...");
                         }
                     } else {
                         log.LogWarning($"could not get room for entity {i} in list {listSelect}, not creating translation for this entity...");
                     }
                 }
+            }
+            //For respawns
+            respawnFixer.GameRespawnsToString(regionState);
+            List<AbstractRoom> rooms = respawnFixer.GetRespawnDenRooms(regionState);
+            foreach (AbstractRoom r in rooms) {
+                if (!IsDuplicateInRoomTranslation(r.index)) {
+                    roomTranslations.Add(new RoomTranslation(r.index, r.name));
+                    log.LogDebug($"Added room from respawn {r.name}");
+                } else {
+                    log.LogDebug($"Skipped adding room from respawn because of duplication: {r.name}");
+                }
+                
             }
             //DEBUG:
             log.Log("Dumping new room translations list");
@@ -571,17 +641,17 @@ namespace CustomRegionSaves {
             SFLogSource log = new SFLogSource("SFRegionState::RecoverOutOfRegionObjects");
             for (int i = 0; i < outOfRegionObjects.Count; ++i) {
                 log.Log($"Invalid Object data: {outOfRegionObjects[i].entityData}");
-                for (int r = region.world.firstRoomIndex; r < region.world.firstRoomIndex + region.world.NumberOfRooms; ++r) {
-                    AbstractRoom abstractRoom = region.world.GetAbstractRoom(r);
+                for (int r = regionState.world.firstRoomIndex; r < regionState.world.firstRoomIndex + regionState.world.NumberOfRooms; ++r) {
+                    AbstractRoom abstractRoom = regionState.world.GetAbstractRoom(r);
                     if (abstractRoom != null && outOfRegionObjects[i].roomName != null && abstractRoom.name == outOfRegionObjects[i].roomName) {
-                        AbstractPhysicalObject abstractObject = SaveState.AbstractPhysicalObjectFromString(region.world, outOfRegionObjects[i].entityData);
+                        AbstractPhysicalObject abstractObject = SaveState.AbstractPhysicalObjectFromString(regionState.world, outOfRegionObjects[i].entityData);
                         string restoredObject = null;
                         if (abstractObject != null) {
                             abstractObject.pos.room = r;
                             restoredObject = abstractObject.ToString();
                         }
                         if (restoredObject != null) {
-                            region.savedObjects.Add(restoredObject);
+                            regionState.savedObjects.Add(restoredObject);
                             outOfRegionObjects[i] = null;
                             log.Log($"Invalid object made valid again in room {abstractRoom.name} : {restoredObject}");
                             break;
@@ -598,8 +668,8 @@ namespace CustomRegionSaves {
             SFLogSource log = new SFLogSource("SFRegionState::RecoverOutOfRegionPopulation");
             for (int i = 0; i < outOfRegionPopulation.Count; ++i) {
                 log.Log($"Invalid Population data: {outOfRegionPopulation[i].entityData}");
-                for (int r = region.world.firstRoomIndex; r < region.world.firstRoomIndex + region.world.NumberOfRooms; ++r) {
-                    AbstractRoom abstractRoom = region.world.GetAbstractRoom(r);
+                for (int r = regionState.world.firstRoomIndex; r < regionState.world.firstRoomIndex + regionState.world.NumberOfRooms; ++r) {
+                    AbstractRoom abstractRoom = regionState.world.GetAbstractRoom(r);
                     if (abstractRoom != null && outOfRegionPopulation[i].roomName != null && abstractRoom.name == outOfRegionPopulation[i].roomName) {
                         string[] creatureData = Regex.Split(outOfRegionPopulation[i].entityData, "<cA>");
                         if (creatureData.Length >= 3) {
@@ -615,7 +685,7 @@ namespace CustomRegionSaves {
                                     }
                                 }
                                 log.Log($"Invalid creature made valid again in room {abstractRoom.name} : {restoredCreature}");
-                                region.savedPopulation.Add(restoredCreature);
+                                regionState.savedPopulation.Add(restoredCreature);
                                 outOfRegionPopulation[i] = null;
                             } else {
                                 log.LogError($"Failed to restore creature: could not get abstract node on index {i}");
@@ -633,8 +703,8 @@ namespace CustomRegionSaves {
             SFLogSource log = new SFLogSource("SFRegionState::RecoverOutOfRegionSticks");
             for (int i = 0; i < outOfRegionSticks.Count; ++i) {
                 log.Log($"Invalid Stick data: {outOfRegionSticks[i].entityData}");
-                for (int r = region.world.firstRoomIndex; r < region.world.firstRoomIndex + region.world.NumberOfRooms; ++r) {
-                    AbstractRoom abstractRoom = region.world.GetAbstractRoom(r);
+                for (int r = regionState.world.firstRoomIndex; r < regionState.world.firstRoomIndex + regionState.world.NumberOfRooms; ++r) {
+                    AbstractRoom abstractRoom = regionState.world.GetAbstractRoom(r);
                     if (abstractRoom != null && outOfRegionPopulation[i].roomName != null && abstractRoom.name == outOfRegionPopulation[i].roomName) {
                         string[] stickData = Regex.Split(outOfRegionSticks[i].entityData, "<stkA>");
                         if (stickData.Length >= 1) {
@@ -648,7 +718,7 @@ namespace CustomRegionSaves {
                                 }
                             }
                             log.Log($"Invalid stick made valid again in room {abstractRoom.name} : {restoredStick}");
-                            region.savedSticks.Add(restoredStick);
+                            regionState.savedSticks.Add(restoredStick);
                             outOfRegionSticks[i] = null;
                         } else {
                             log.LogWarning($"Failed to restore creature could not access room number on section 0 of index {i}");
@@ -663,12 +733,12 @@ namespace CustomRegionSaves {
             SFLogSource log = new SFLogSource("SFRegionState::RecoverOutOfRegionConsumables");
             for (int i = 0; i < outOfRegionConsumedItems.Count; ++i) {
                 log.Log($"Invalid Consumable data: {outOfRegionConsumedItems[i].entityData}");
-                for (int r = region.world.firstRoomIndex; r < region.world.firstRoomIndex + region.world.NumberOfRooms; ++r) {
-                    AbstractRoom abstractRoom = region.world.GetAbstractRoom(r);
+                for (int r = regionState.world.firstRoomIndex; r < regionState.world.firstRoomIndex + regionState.world.NumberOfRooms; ++r) {
+                    AbstractRoom abstractRoom = regionState.world.GetAbstractRoom(r);
                     if (abstractRoom != null && outOfRegionConsumedItems[i].roomName != null && abstractRoom.name == outOfRegionConsumedItems[i].roomName) {
                         RegionState.ConsumedItem restoredConsumable = new RegionState.ConsumedItem(0, 0, 0);
                         restoredConsumable.FromString(outOfRegionConsumedItems[i].entityData);
-                        region.consumedItems.Add(restoredConsumable);
+                        regionState.consumedItems.Add(restoredConsumable);
                         outOfRegionConsumedItems[i] = null;
                         log.Log($"Invalid consumable made valid again in room {abstractRoom.name} : {restoredConsumable.ToString()}");
                         break;
@@ -692,17 +762,17 @@ namespace CustomRegionSaves {
             SFLogSource log = new SFLogSource("SFRegionState::CorrectCreatureAbstractNode");
             if (coord != null) {
                 if (coord.NodeDefined) {
-                    AbstractRoom denRoom = region.world.GetAbstractRoom(coord);
+                    AbstractRoom denRoom = regionState.world.GetAbstractRoom(coord);
                     if (denRoom != null) {
                         bool notInRange = false;
                         if (!(!(denRoom.nodes.Length <= coord.abstractNode || coord.abstractNode < 0))) {
                             notInRange = true;
                             log.LogWarning($"Creature at coordinate ({coord}) has a node outside of range! {denRoom.name} nodeTotal: {denRoom.TotalNodes} | requested node: {coord.abstractNode}");
                         }
-                        if (notInRange || region.world.GetNode(coord).type != AbstractRoomNode.Type.Den) {
+                        if (notInRange || regionState.world.GetNode(coord).type != AbstractRoomNode.Type.Den) {
                             log.Log($"orig coordinate {coord.ToString()} | {denRoom.name}");
                             if (denRoom != null) {
-                                int[] filledIndexes = GetCreatureUsedDensInRoom(coord.room, region.savedPopulation, coord.abstractNode);
+                                int[] filledIndexes = GetCreatureUsedDensInRoom(coord.room, regionState.savedPopulation, coord.abstractNode);
                                 bool closestDir = false; //True is left, false is right. (if the distance is 0 this value should be true)
                                 int? closestValueDistance = null;
                                 int? closestValidIndex = null;
@@ -769,7 +839,7 @@ namespace CustomRegionSaves {
             if (creatureList != null) {
                 List<int> filledDens = new List<int>();
                 for (int i = 0; i < creatureList.Count; ++i) {
-                    AbstractCreature creature = SaveState.AbstractCreatureFromString(region.world, creatureList[i], true);
+                    AbstractCreature creature = SaveState.AbstractCreatureFromString(regionState.world, creatureList[i], true);
                     if (creature != null) {
                         if (creature.pos.room == roomIndex) {
                             bool excluded = false;
@@ -794,14 +864,15 @@ namespace CustomRegionSaves {
                 return null;
             }
         }
-
-
+        public RespawnCorrector respawnFixer;
         public List<RoomTranslation> roomTranslations;
         public List<OutOfRegionEntity> outOfRegionObjects;
         public List<OutOfRegionEntity> outOfRegionPopulation;
         public List<OutOfRegionEntity> outOfRegionSticks;
         public List<OutOfRegionEntity> outOfRegionConsumedItems;
-        private RegionState region;
+        public RegionState regionState { get; }
+        //TODO implement this
+        bool shouldCreateBackup = true;
 
         public class RoomTranslation {
             public RoomTranslation(int nRoomFrom, string nRoomName) {

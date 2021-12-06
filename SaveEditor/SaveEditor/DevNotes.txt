@@ -1,5 +1,21 @@
 ﻿Notes:
-------------------------
+------------------------\
+
+TODO : Fix creature ids (They are based off of their original spawner by the looks of things)
+TODO : Fix respawn ids
+
+
+
+
+
+
+
+BACKLOG : Eventually look for everything that is in savestate and regionstate!
+
+
+
+
+
 So First a spawner's location is moved
  That spawner is saved
 The spawner suddently has a valid position.
@@ -17,3 +33,22 @@ Objects, spawns, sticks, and consumables should remain in their correct location
 Creatures that spawn/have a den in a pipe that has been removed/made invalid will attempt to move into a nearby valid pipe!
 The mod should work with both CRS and merge regions.
 *Note that this mod cannot restore an already corrupted file, and should only prevent the future corruption of files that already work.
+
+Translating respawns/Spawners:
+ Anything that saves it's EntityID will save a spawner and an ID number.
+   Creature's ID numbers do not change, since it defines most properties of the creature itself.
+   However, it is possible for the spawner ID to be incorrect, since the IDs of spawners in a world can "shift" when the number of spawners change.
+   (By spawner, this is talking about CreatureSpawners, not arena spawners)
+   A spawner ID is the region index + the index in the region. (which means that not only can the region of a spawner ID can shift, but so can the position in a region!)
+ There are two types of spawners used in the game: SimpleSpawner and Lineage
+  
+  
+
+
+
+
+File Hirarchy:
+
+FILE_VERSION <ver> FILE_DATA
+                       |
+                       

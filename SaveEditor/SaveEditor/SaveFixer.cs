@@ -36,9 +36,9 @@ namespace CustomRegionSaves {
         //  Version number, used in fileAssemblyVersion: (majorversion.minorversion.hotfix)
         public const string versionString = "0.1.2";
         // Incremented for every revision/build
-        public const string  buildNumber = "9";
+        public const string  buildNumber = "33";
         // Logger for CustomRegionSaves (outputs to SaveFixerLog.txt)
-        //TODO Switch log file to CRSaveLog.txt and to remember to delete the old one (SaveFixerLog.txt)
+        //TODO - Switch log file to CRSaveLog.txt and to remember to delete the old one (SaveFixerLog.txt)
         public static SFLog outputLog = new SFLog();
 
         public SaveFixer() {
@@ -54,14 +54,14 @@ namespace CustomRegionSaves {
             On.WorldLoader.GeneratePopulation += SpawnerDenFix.WorldLoader_GeneratePopulation;
         }
 
-        // Called when the plugin is destoryed by Unity. <br></br>
-        // Disposes of the outputLog stream and writes that this is the end of the log.
-#pragma warning disable IDE0051 //This is an error caused since this function is not referenced by anything in the project directly.
+        // Called when the plugin is destoryed by Unity.
+#pragma warning disable IDE0051 //warning since this function is not referenced by anything in the project.
         void OnDestroy() {
             outputLog.LogString(" End log\n##################################################");
             outputLog.Dispose();
         }
 #pragma warning restore IDE0051
+
         //Should delete the CRsav file when you press the big "reset save" button from the options menu.
         public static void PlayerProgession_WipeAll(On.PlayerProgression.orig_WipeAll orig, PlayerProgression instance) {
             SFLogSource logger = new SFLogSource("PlayerProgession_WipeAll");
@@ -110,15 +110,16 @@ namespace CustomRegionSaves {
         //Fix room translations when adapting the save file to world (sav >> game)
         public static void RegionState_AdaptWorldToRegionState(On.RegionState.orig_AdaptWorldToRegionState orig, RegionState instance) {
             SFLogSource l = new SFLogSource("RegionState_AdaptWorldToRegionState");
-            l.Log($"Adapting world to save data: {instance.regionName} | cycle: {instance.saveState.cycleNumber}");
+            l.Log($"CRSave >> world | Region: {instance.regionName}, cycle: {instance.saveState.cycleNumber}");
             //Check the amount of additional time CustomRegionSaves adds to the saving/loading process.
             var watch = new System.Diagnostics.Stopwatch(); watch.Start();
 
             //NOTE : This is where the tricky stuff starts
             SFRegionState savFix = new SFRegionState(instance);
-            savFix.AdaptToSaveFile();
-            savFix.ApplyRoomTranslationsToRegion();
+            savFix.LoadCRsavedata();
+            savFix.FixRegion();
             savFix.RecoverOutOfRegionEntities();
+            savFix.respawnFixer.FixRespawns(savFix); //Temp
             string regionData = savFix.SaveToString();
             SFFile.WriteRegion(regionData, instance);
 
@@ -138,7 +139,7 @@ namespace CustomRegionSaves {
             var watch = new System.Diagnostics.Stopwatch();
             watch.Start();
             SFRegionState savFix = new SFRegionState(instance);
-            savFix.AdaptToSaveFile(); //This will load any previously saved outOfRegionObjects, translations will be immedietly overwritten
+            savFix.LoadCRsavedata(); //This will load any previously saved outOfRegionObjects, translations will be immedietly overwritten
             savFix.AdaptTranslationsToWorld();
             string regionData = savFix.SaveToString();
             SFFile.WriteRegion(regionData, instance);
